@@ -25,7 +25,7 @@ describe('validation schemas', () => {
   });
 
   it('loginSchema requires both email and password', () => {
-    const { error } = loginSchema.validate({});
+    const { error } = loginSchema.validate({}, { abortEarly: false });
     expect(error).toBeDefined();
 
     const messages = error!.details.map(d => d.message).join(' | ');

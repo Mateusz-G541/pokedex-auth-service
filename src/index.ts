@@ -13,7 +13,7 @@ import { logger } from './utils/logger';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT: number = Number(process.env.PORT) || 4000;
 
 // Security middleware
 app.use(helmet());

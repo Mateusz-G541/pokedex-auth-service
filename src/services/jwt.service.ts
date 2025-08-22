@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions, Secret } from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../utils/logger';
@@ -12,8 +12,8 @@ export interface JwtPayload {
 }
 
 class JwtService {
-  private privateKey: string;
-  private publicKey: string;
+  private privateKey!: string;
+  private publicKey!: string;
 
   constructor() {
     this.loadKeys();
@@ -36,14 +36,20 @@ class JwtService {
 
   generateToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
     try {
-      const expiresIn = process.env.JWT_EXPIRES_IN || '24h';
-      
-      return jwt.sign(payload, this.privateKey, {
+      const expiresInEnv = process.env.JWT_EXPIRES_IN;
+      const expiresIn: SignOptions['expiresIn'] =
+        expiresInEnv && /^\d+$/.test(expiresInEnv)
+          ? Number(expiresInEnv)
+          : ((expiresInEnv || '24h') as unknown as SignOptions['expiresIn']);
+
+      const options: SignOptions = {
         algorithm: 'RS256',
         expiresIn,
         issuer: 'pokedex-auth-service',
         audience: 'pokedex-app'
-      });
+      };
+
+      return jwt.sign(payload as object, this.privateKey as Secret, options);
     } catch (error) {
       logger.error('Failed to generate JWT token', { error: (error as Error).message });
       throw createError('Failed to generate authentication token', 500);
@@ -52,7 +58,7 @@ class JwtService {
 
   verifyToken(token: string): JwtPayload {
     try {
-      const decoded = jwt.verify(token, this.publicKey, {
+      const decoded = jwt.verify(token, this.publicKey as Secret, {
         algorithms: ['RS256'],
         issuer: 'pokedex-auth-service',
         audience: 'pokedex-app'
