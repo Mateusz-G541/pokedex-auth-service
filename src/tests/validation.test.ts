@@ -1,6 +1,6 @@
 /// <reference types="vitest" />
 import { describe, it, expect } from 'vitest';
-import { registerSchema, loginSchema } from './validation';
+import { registerSchema, loginSchema } from '../utils/validation';
 
 describe('validation schemas', () => {
   it('registerSchema accepts a valid email and strong password', () => {
@@ -31,5 +31,17 @@ describe('validation schemas', () => {
     const messages = error!.details.map(d => d.message).join(' | ');
     expect(messages).toContain('Email is required');
     expect(messages).toContain('Password is required');
+  });
+
+  it('registerSchema rejects password shorter than 8 characters', () => {
+    const { error } = registerSchema.validate({
+      email: 'user@example.com',
+      password: 'Aa1!a'
+    });
+
+    expect(error).toBeDefined();
+    expect(error?.details.map(d => d.message).join(' | ')).toContain(
+      'Password must be at least 8 characters long'
+    );
   });
 });
