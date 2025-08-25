@@ -13,7 +13,8 @@ vi.mock('fs', () => ({
 class MockTokenExpiredError extends Error {}
 class MockJsonWebTokenError extends Error {}
 
-const signSpy = vi.fn((_payload: object) => 'mock.token.value');
+// Allow arbitrary args to match jsonwebtoken.sign(payload, secret, options)
+const signSpy = vi.fn((..._args: any[]) => 'mock.token.value');
 const verifySpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
 const decodeSpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
 
@@ -78,5 +79,22 @@ describe('JwtService', () => {
     const payload = jwtService.decodeToken('mock.token');
     expect(payload).toMatchObject({ userId: 1, email: 'user@example.com' });
     expect(decodeSpy).toHaveBeenCalled();
+  });
+
+  it('getPublicKey returns a non-empty string', () => {
+    const pub = jwtService.getPublicKey();
+    expect(typeof pub).toBe('string');
+    expect(pub.length).toBeGreaterThan(0);
+  });
+
+  it('generateToken respects numeric JWT_EXPIRES_IN from env', () => {
+    const prev = process.env.JWT_EXPIRES_IN;
+    process.env.JWT_EXPIRES_IN = '3600';
+
+    jwtService.generateToken({ userId: 2, email: 'user2@example.com' });
+    const args = signSpy.mock.calls.at(-1)!; // last call
+    expect(args[2].expiresIn).toBe(3600);
+
+    process.env.JWT_EXPIRES_IN = prev;
   });
 });
