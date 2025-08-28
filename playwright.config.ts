@@ -19,7 +19,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_NO_WEBSERVER
     ? undefined
     : {
-        command: 'npm run dev',
+        command: 'npm run dev:test',
         url: `${BASE_URL}/health`,
         reuseExistingServer: !process.env.CI,
         timeout: 60_000,
