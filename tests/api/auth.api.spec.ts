@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { register, login, me, newApiContext } from './helpers/auth';
+import { issueExpiredToken } from './helpers/token';
 import { uniqueEmail, TestPasswords } from './fixtures/test-data';
 
 // All routes here assume app mounted under /auth in src/index.ts
@@ -10,6 +11,62 @@ test.describe('Auth API', () => {
 
   test.beforeAll(async ({ baseURL }) => {
     api = await newApiContext(baseURL);
+  });
+
+  // JWT robustness tests
+  test('GET /auth/me with expired token -> 401', async () => {
+    // Create a new user to get a valid userId/email
+    const email = uniqueEmail('expired');
+    const password = TestPasswords.valid;
+    const { res: regRes, json: regBody } = await register(api, email, password);
+    expect(regRes.status(), await regRes.text()).toBe(201);
+    const userId = regBody?.data?.user?.id as number;
+
+    const expired = issueExpiredToken(userId, email);
+    const res = await api.get('/auth/me', { headers: { Authorization: `Bearer ${expired}` } });
+    expect(res.status(), await res.text()).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/expired|invalid token/i);
+  });
+
+  test('GET /auth/me with tampered token -> 401', async () => {
+    const email = uniqueEmail('tamper');
+    const password = TestPasswords.valid;
+    const { res: regRes, json: regBody } = await register(api, email, password);
+    expect(regRes.status(), await regRes.text()).toBe(201);
+    const userId = regBody?.data?.user?.id as number;
+
+    // Get a valid token via login then tamper payload
+    const { json: loginBody } = await login(api, email, password);
+    const token = loginBody?.data?.token as string;
+    const tampered = token.replace(/\.[^.]+\./, '.eyJmYWtlIjoiZGF0YSJ9.'); // replace payload with fake base64 JSON
+    const res = await api.get('/auth/me', { headers: { Authorization: `Bearer ${tampered}` } });
+    expect(res.status(), await res.text()).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/invalid token/i);
+  });
+
+  test('GET /auth/me without Authorization header -> 401', async () => {
+    const res = await api.get('/auth/me');
+    expect(res.status(), await res.text()).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Authorization header is required/);
+  });
+
+  test('GET /auth/me with invalid Bearer header format -> 401', async () => {
+    const email = uniqueEmail('badbearer');
+    const password = TestPasswords.valid;
+    const { res: regRes } = await register(api, email, password);
+    expect(regRes.status(), await regRes.text()).toBe(201);
+
+    const res = await api.get('/auth/me', { headers: { Authorization: 'Token something' } });
+    expect(res.status(), await res.text()).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Bearer token is required/);
   });
 
   test('login happy path for an existing user', async () => {
