@@ -12,6 +12,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "ts-node prisma/seed.ts",
     "test": "vitest",
+    "test:api": "bash scripts/gen-keys.sh && playwright test -c playwright.config.ts --project=API",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/**/*.ts",
@@ -48,6 +49,7 @@
     "prisma": "^5.1.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@types/bcrypt": "^5.0.0",
     "@types/cors": "^2.8.13",
     "@types/express": "^4.17.17",
