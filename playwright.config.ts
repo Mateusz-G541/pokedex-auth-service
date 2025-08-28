@@ -1,8 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = process.env.PORT || '4000';
+const TEST_PORT = process.env.PLAYWRIGHT_PORT || '4010';
 const HOST = process.env.HOST || '127.0.0.1';
-const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://${HOST}:${PORT}`;
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://${HOST}:${TEST_PORT}`;
 const DEFAULT_DB_URL = 'mysql://auth_user:auth_password@127.0.0.1:3307/auth_db';
 
 export default defineConfig({
@@ -21,10 +21,10 @@ export default defineConfig({
     : {
         command: 'npm run dev:test',
         url: `${BASE_URL}/health`,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
         timeout: 60_000,
         env: {
-          PORT,
+          PORT: TEST_PORT,
           HOST,
           DATABASE_URL: process.env.DATABASE_URL || DEFAULT_DB_URL,
           JWT_PRIVATE_KEY_PATH: process.env.JWT_PRIVATE_KEY_PATH || './keys/private.pem',
