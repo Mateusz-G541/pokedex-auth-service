@@ -143,4 +143,62 @@ test.describe('Auth API', () => {
     expect(pem).toMatch(/-----BEGIN PUBLIC KEY-----/);
     expect(pem.trim().endsWith('-----END PUBLIC KEY-----')).toBe(true);
   });
+
+  // Validation tests (error 400 from Joi schemas in src/utils/validation.ts)
+  test('register validation: missing email and password -> 400 with combined messages', async () => {
+    const res = await api.post('/auth/register', { data: {} });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Email is required/);
+    expect(String(body.error)).toMatch(/Password is required/);
+  });
+
+  test('register validation: invalid email format -> 400', async () => {
+    const res = await api.post('/auth/register', { data: { email: 'not-an-email', password: 'P@ssw0rd123!' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Please provide a valid email address/);
+  });
+
+  test('register validation: weak password (missing special char) -> 400', async () => {
+    const res = await api.post('/auth/register', { data: { email: uniqueEmail('weak'), password: 'Passw0rd' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character/);
+  });
+
+  test('register validation: too short password -> 400', async () => {
+    const res = await api.post('/auth/register', { data: { email: uniqueEmail('short'), password: 'P@1a' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Password must be at least 8 characters long/);
+  });
+
+  test('login validation: missing email -> 400', async () => {
+    const res = await api.post('/auth/login', { data: { password: 'whatever' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Email is required/);
+  });
+
+  test('login validation: missing password -> 400', async () => {
+    const res = await api.post('/auth/login', { data: { email: uniqueEmail('no-pass') } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Password is required/);
+  });
+
+  test('login validation: invalid email format -> 400', async () => {
+    const res = await api.post('/auth/login', { data: { email: 'bad', password: 'something' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Please provide a valid email address/);
+  });
 });
