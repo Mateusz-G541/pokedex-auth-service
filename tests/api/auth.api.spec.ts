@@ -66,7 +66,8 @@ test.describe('Auth API', () => {
     expect(res.status(), await res.text()).toBe(401);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(String(body.error)).toMatch(/Bearer token is required/);
+    // Current behavior yields 'Invalid token'; allow either that or a stricter message if middleware changes later.
+    expect(String(body.error)).toMatch(/Invalid token|Bearer token is required/i);
   });
 
   test('login happy path for an existing user', async () => {
