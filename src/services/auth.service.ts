@@ -22,6 +22,7 @@ export interface AuthResponse {
     id: number;
     email: string;
     createdAt: Date;
+    updatedAt: Date;
   };
 }
 
@@ -29,6 +30,7 @@ export interface UserProfile {
   id: number;
   email: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 class AuthService {
@@ -75,7 +77,8 @@ class AuthService {
         user: {
           id: user.id,
           email: user.email,
-          createdAt: user.createdAt
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
         }
       };
     } catch (error) {
@@ -117,7 +120,8 @@ class AuthService {
         user: {
           id: user.id,
           email: user.email,
-          createdAt: user.createdAt
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
         }
       };
     } catch (error) {
@@ -132,7 +136,8 @@ class AuthService {
       select: {
         id: true,
         email: true,
-        createdAt: true
+        createdAt: true,
+        updatedAt: true
       }
     });
 
