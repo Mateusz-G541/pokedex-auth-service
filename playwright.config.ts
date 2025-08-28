@@ -3,6 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = process.env.PORT || '4000';
 const HOST = process.env.HOST || '127.0.0.1';
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://${HOST}:${PORT}`;
+const DEFAULT_DB_URL = 'mysql://auth_user:auth_password@127.0.0.1:3307/auth_db';
 
 export default defineConfig({
   testDir: 'tests',
@@ -22,6 +23,19 @@ export default defineConfig({
         url: `${BASE_URL}/health`,
         reuseExistingServer: !process.env.CI,
         timeout: 60_000,
+        env: {
+          PORT,
+          HOST,
+          DATABASE_URL: process.env.DATABASE_URL || DEFAULT_DB_URL,
+          JWT_PRIVATE_KEY_PATH: process.env.JWT_PRIVATE_KEY_PATH || './keys/private.pem',
+          JWT_PUBLIC_KEY_PATH: process.env.JWT_PUBLIC_KEY_PATH || './keys/public.pem',
+          JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '24h',
+          BCRYPT_ROUNDS: process.env.BCRYPT_ROUNDS || '12',
+          CORS_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:5173',
+          RATE_LIMIT_WINDOW_MS: process.env.RATE_LIMIT_WINDOW_MS || '900000',
+          RATE_LIMIT_MAX_REQUESTS: process.env.RATE_LIMIT_MAX_REQUESTS || '100',
+          NODE_ENV: process.env.NODE_ENV || 'test',
+        },
       },
   projects: [
     { name: 'API', use: { ...devices['Desktop Chrome'] } },
