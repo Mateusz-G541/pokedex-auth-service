@@ -201,4 +201,38 @@ test.describe('Auth API', () => {
     expect(body.success).toBe(false);
     expect(String(body.error)).toMatch(/Please provide a valid email address/);
   });
+
+  test('login validation: missing email and password together -> 400 with both messages', async () => {
+    const res = await api.post('/auth/login', { data: {} });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Email is required/);
+    expect(String(body.error)).toMatch(/Password is required/);
+  });
+
+  test('register validation: invalid email AND too short password -> 400 with both messages', async () => {
+    const res = await api.post('/auth/register', { data: { email: 'bad', password: 'P@1a' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/Please provide a valid email address/);
+    expect(String(body.error)).toMatch(/at least 8 characters/);
+  });
+
+  test('register validation: password missing uppercase -> 400', async () => {
+    const res = await api.post('/auth/register', { data: { email: uniqueEmail('no-upper'), password: 'p@ssw0rd1' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/must contain at least one uppercase letter/);
+  });
+
+  test('register validation: password missing lowercase -> 400', async () => {
+    const res = await api.post('/auth/register', { data: { email: uniqueEmail('no-lower'), password: 'P@SSW0RD1' } });
+    expect(res.status(), await res.text()).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(String(body.error)).toMatch(/must contain at least one uppercase letter, one lowercase letter, one number, and one special character/);
+  });
 });
