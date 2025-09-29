@@ -6,6 +6,7 @@ import 'express-async-errors';
 import dotenv from 'dotenv';
 
 import authRoutes from './routes/auth.routes';
+import userRoutes from './routes/user.routes';
 import { errorHandler } from './middleware/error.middleware';
 import { logger } from './utils/logger';
 
@@ -54,6 +55,7 @@ app.get('/health', (req, res) => {
 
 // Routes
 app.use('/auth', authRoutes);
+app.use('/users', userRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {

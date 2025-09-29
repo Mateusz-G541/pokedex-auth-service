@@ -7,6 +7,7 @@ import { createError } from '../middleware/error.middleware';
 export interface JwtPayload {
   userId: number;
   email: string;
+  role: string;
   iat?: number;
   exp?: number;
 }

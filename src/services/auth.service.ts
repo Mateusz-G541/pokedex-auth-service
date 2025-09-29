@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Role } from '@prisma/client';
 import { jwtService, JwtPayload } from './jwt.service';
 import { createError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
