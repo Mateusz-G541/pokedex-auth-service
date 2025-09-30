@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { jwtService, JwtPayload } from './jwt.service';
 import { createError } from '../middleware/error.middleware';
 import { logger } from '../utils/logger';
@@ -21,6 +21,7 @@ export interface AuthResponse {
   user: {
     id: number;
     email: string;
+    role?: string;
     createdAt: Date;
     updatedAt: Date;
   };
@@ -29,6 +30,7 @@ export interface AuthResponse {
 export interface UserProfile {
   id: number;
   email: string;
+  role?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -64,10 +66,11 @@ class AuthService {
         }
       });
 
-      // Generate JWT token
+      // Generate JWT token (include role)
       const token = jwtService.generateToken({
         userId: user.id,
-        email: user.email
+        email: user.email,
+        role: (user as any).role || 'USER'
       });
 
       logger.info('User registered successfully', { userId: user.id, email: user.email });
@@ -77,6 +80,7 @@ class AuthService {
         user: {
           id: user.id,
           email: user.email,
+          role: (user as any).role || 'USER',
           createdAt: user.createdAt,
           updatedAt: user.updatedAt
         }
@@ -107,10 +111,11 @@ class AuthService {
     }
 
     try {
-      // Generate JWT token
+      // Generate JWT token (include role)
       const token = jwtService.generateToken({
         userId: user.id,
-        email: user.email
+        email: user.email,
+        role: (user as any).role || 'USER'
       });
 
       logger.info('User logged in successfully', { userId: user.id, email: user.email });
@@ -120,6 +125,7 @@ class AuthService {
         user: {
           id: user.id,
           email: user.email,
+          role: (user as any).role || 'USER',
           createdAt: user.createdAt,
           updatedAt: user.updatedAt
         }
@@ -136,6 +142,7 @@ class AuthService {
       select: {
         id: true,
         email: true,
+        role: true,
         createdAt: true,
         updatedAt: true
       }
