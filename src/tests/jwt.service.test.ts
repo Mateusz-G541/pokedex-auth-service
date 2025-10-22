@@ -13,27 +13,35 @@ vi.mock('fs', () => ({
 class MockTokenExpiredError extends Error {}
 class MockJsonWebTokenError extends Error {}
 
-// Allow arbitrary args to match jsonwebtoken.sign(payload, secret, options)
-const signSpy = vi.fn((..._args: any[]) => 'mock.token.value');
-const verifySpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
-const decodeSpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
-
-vi.mock('jsonwebtoken', () => ({
-  default: {
+// Mock jsonwebtoken - create spies inside the factory to avoid hoisting issues
+vi.mock('jsonwebtoken', () => {
+  const signSpy = vi.fn((..._args: any[]) => 'mock.token.value');
+  const verifySpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
+  const decodeSpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
+  
+  return {
+    default: {
+      sign: signSpy,
+      verify: verifySpy,
+      decode: decodeSpy,
+      TokenExpiredError: MockTokenExpiredError,
+      JsonWebTokenError: MockJsonWebTokenError
+    },
     sign: signSpy,
     verify: verifySpy,
     decode: decodeSpy,
     TokenExpiredError: MockTokenExpiredError,
     JsonWebTokenError: MockJsonWebTokenError
-  },
-  sign: signSpy,
-  verify: verifySpy,
-  decode: decodeSpy,
-  TokenExpiredError: MockTokenExpiredError,
-  JsonWebTokenError: MockJsonWebTokenError
-}));
+  };
+});
 
 import { jwtService } from '../services/jwt.service';
+import jwt from 'jsonwebtoken';
+
+// Get references to the mocked functions after import
+const signSpy = jwt.sign as any;
+const verifySpy = jwt.verify as any;
+const decodeSpy = jwt.decode as any;
 
 describe('JwtService', () => {
   beforeEach(() => {
