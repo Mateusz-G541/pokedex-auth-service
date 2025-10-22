@@ -1,0 +1,196 @@
+name: Build and Push Docker Image to DockerHub
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  DOCKER_IMAGE_NAME: pokedex-auth-service
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: auth_db
+          MYSQL_USER: auth_user
+          MYSQL_PASSWORD: auth_password
+          MYSQL_ROOT_PASSWORD: rootpass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uauth_user -pauth_password"
+          --health-interval=5s
+          --health-timeout=2s
+          --health-retries=20
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Generate RSA keys for testing
+        run: |
+          mkdir -p keys
+          openssl genrsa -out keys/private.pem 4096
+          openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: mysql://auth_user:auth_password@127.0.0.1:3306/auth_db
+        run: npx prisma migrate deploy
+
+      - name: Run tests
+        env:
+          DATABASE_URL: mysql://auth_user:auth_password@127.0.0.1:3306/auth_db
+          NODE_ENV: test
+          JWT_PRIVATE_KEY_PATH: ./keys/private.pem
+          JWT_PUBLIC_KEY_PATH: ./keys/public.pem
+        run: npm test
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix={{branch}}-
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "🧪 Testing Docker image..."
+          
+          # Create test keys directory
+          mkdir -p test-keys
+          openssl genrsa -out test-keys/private.pem 4096
+          openssl rsa -in test-keys/private.pem -pubout -out test-keys/public.pem
+          
+          # Start MySQL container for testing
+          docker run --rm -d \
+            --name test-mysql \
+            -e MYSQL_DATABASE=auth_db \
+            -e MYSQL_USER=auth_user \
+            -e MYSQL_PASSWORD=auth_password \
+            -e MYSQL_ROOT_PASSWORD=rootpass \
+            -p 3307:3306 \
+            mysql:8
+          
+          # Wait for MySQL to be ready
+          echo "⏳ Waiting for MySQL to be ready..."
+          for i in {1..30}; do
+            if docker exec test-mysql mysqladmin ping -h localhost -uauth_user -pauth_password --silent; then
+              echo "✅ MySQL is ready!"
+              break
+            fi
+            echo "⏳ Attempt $i/30..."
+            sleep 2
+          done
+          
+          # Start auth service container
+          docker run --rm -d \
+            -e DATABASE_URL=mysql://auth_user:auth_password@host.docker.internal:3307/auth_db \
+            -e NODE_ENV=production \
+            -e PORT=4000 \
+            -e JWT_PRIVATE_KEY_PATH=./keys/private.pem \
+            -e JWT_PUBLIC_KEY_PATH=./keys/public.pem \
+            -e JWT_EXPIRES_IN=24h \
+            -e BCRYPT_ROUNDS=10 \
+            -e CORS_ORIGIN=http://localhost:3000 \
+            -v $(pwd)/test-keys:/app/keys:ro \
+            -p 4000:4000 \
+            --name test-container \
+            --add-host=host.docker.internal:host-gateway \
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}:latest
+          
+          # Wait for container to start and initialize
+          echo "⏳ Waiting for container to start..."
+          sleep 20
+          
+          # Check if container is still running and get logs
+          if ! docker ps | grep -q test-container; then
+            echo "❌ Container stopped unexpectedly"
+            echo "📋 Container logs:"
+            docker logs test-container 2>&1 || echo "Could not retrieve logs"
+            echo "📋 MySQL logs:"
+            docker logs test-mysql 2>&1 || echo "Could not retrieve MySQL logs"
+            docker stop test-mysql || true
+            exit 1
+          fi
+          
+          # Test health endpoint with retries
+          echo "🔍 Testing health endpoint..."
+          for i in {1..10}; do
+            if curl -f http://localhost:4000/health; then
+              echo "✅ Health check passed!"
+              break
+            else
+              echo "⏳ Attempt $i/10 failed, retrying in 5 seconds..."
+              sleep 5
+            fi
+            if [ $i -eq 10 ]; then
+              echo "❌ Health check failed after 10 attempts"
+              echo "📋 Auth service logs:"
+              docker logs test-container
+              echo "📋 MySQL logs:"
+              docker logs test-mysql
+              docker stop test-container
+              docker stop test-mysql
+              exit 1
+            fi
+          done
+          
+          # Cleanup
+          docker stop test-container
+          docker stop test-mysql
+          rm -rf test-keys
+          
+          echo "✅ Docker image test passed!"
+
+      - name: Image digest
+        if: github.event_name != 'pull_request'
+        run: echo ${{ steps.build.outputs.digest }}

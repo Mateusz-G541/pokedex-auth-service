@@ -1,256 +1,309 @@
 #!/bin/bash
 
-# Pokedex Auth Service Deployment Script for Mikrus VPS
-# This script handles deployment with zero-downtime and rollback capability
+# Pokedex Auth Service Deployment Script
+# This script handles deployment of the Pokedex Auth service using Docker Compose
 
-set -e
+set -e  # Exit on any error
 
 # Configuration
-SERVICE_NAME="pokedex-auth-service"
-DEPLOY_DIR="/home/deploy/pokedex-auth-service"
-BACKUP_DIR="/home/deploy/backups/auth-service"
-DOCKER_IMAGE="pokedex-auth-service:latest"
-DOCKER_COMPOSE_FILE="docker-compose.prod.yml"
-ENV_FILE=".env.production"
-MAX_BACKUPS=5
+REPO_URL="https://github.com/Mateusz-G541/pokedex-auth-service.git"
+PROJECT_DIR="/opt/pokedex-auth-service"
+COMPOSE_FILE="docker-compose.prod.yml"
+SERVICE_NAME="auth-service"
+HEALTH_URL="http://localhost:4000/health"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Logging function
 log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
+}
+
+# Load environment variables from .env.production so we can use credentials if provided
+load_env() {
+    if [ -f ".env.production" ]; then
+        # shellcheck disable=SC2046
+        set -a
+        source .env.production
+        set +a
+    fi
+}
+
+# Login to Docker Hub if credentials are provided via env vars
+dockerhub_login() {
+    if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+        log "Logging into Docker Hub as $DOCKERHUB_USERNAME..."
+        # Use --password-stdin to avoid exposing token in process list
+        echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin || {
+            warning "Docker Hub login failed; proceeding without login"
+            return 0
+        }
+        success "Docker Hub login successful"
+    else
+        log "Docker Hub credentials not provided; attempting anonymous pull"
+    fi
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-    exit 1
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
 warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Check if running as appropriate user
-check_user() {
-    if [ "$EUID" -eq 0 ]; then 
-        error "Please do not run as root. Use deploy user instead."
+# Detect Docker Compose command (v2 plugin vs legacy)
+set_compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        COMPOSE="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE="docker-compose"
+    else
+        error "Neither 'docker compose' (v2) nor 'docker-compose' (v1) is installed. Please install Docker Compose."
+        exit 1
     fi
 }
 
-# Create backup of current deployment
-create_backup() {
-    log "Creating backup of current deployment..."
+# Check if Docker and Docker Compose are installed
+check_dependencies() {
+    log "Checking dependencies..."
     
-    if [ -d "$DEPLOY_DIR" ]; then
-        mkdir -p "$BACKUP_DIR"
-        BACKUP_NAME="backup-$(date +'%Y%m%d-%H%M%S')"
-        
-        # Backup current deployment
-        cp -r "$DEPLOY_DIR" "$BACKUP_DIR/$BACKUP_NAME"
-        
-        # Backup database
-        if docker ps | grep -q pokedex-mysql; then
-            docker exec pokedex-mysql mysqldump -u root -p${MYSQL_ROOT_PASSWORD} auth_db > "$BACKUP_DIR/$BACKUP_NAME/database.sql"
+    if ! command -v docker &> /dev/null; then
+        error "Docker is not installed. Please install Docker first."
+        exit 1
+    fi
+    # Set COMPOSE variable to appropriate command
+    set_compose_cmd
+    
+    success "Dependencies check passed"
+}
+
+# Clone or update repository
+update_code() {
+    log "Updating code from repository..."
+    
+    if [ -d "$PROJECT_DIR" ]; then
+        log "Project directory exists, pulling latest changes..."
+        cd "$PROJECT_DIR"
+        git fetch origin
+        # Determine default remote branch (prefer main, else master)
+        if git show-ref --verify --quiet refs/remotes/origin/main; then
+            TARGET_REF="origin/main"
+        elif git show-ref --verify --quiet refs/remotes/origin/master; then
+            TARGET_REF="origin/master"
+        else
+            # Fallback to remote HEAD if available
+            TARGET_REF="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^refs/remotes/##')"
         fi
-        
-        log "Backup created: $BACKUP_NAME"
-        
-        # Clean old backups (keep only MAX_BACKUPS)
-        cd "$BACKUP_DIR"
-        ls -t | tail -n +$((MAX_BACKUPS + 1)) | xargs -r rm -rf
-    else
-        warning "No existing deployment found, skipping backup"
-    fi
-}
-
-# Pull latest code
-pull_code() {
-    log "Pulling latest code from repository..."
-    
-    cd "$DEPLOY_DIR"
-    git fetch origin
-    git reset --hard origin/main
-    
-    log "Code updated successfully"
-}
-
-# Build Docker image
-build_image() {
-    log "Building Docker image..."
-    
-    cd "$DEPLOY_DIR"
-    docker build -t "$DOCKER_IMAGE" .
-    
-    log "Docker image built successfully"
-}
-
-# Run database migrations
-run_migrations() {
-    log "Running database migrations..."
-    
-    # Wait for MySQL to be ready
-    sleep 5
-    
-    # Run migrations inside a temporary container
-    docker run --rm \
-        --network pokedex-auth-service_pokedex-network \
-        --env-file "$DEPLOY_DIR/$ENV_FILE" \
-        "$DOCKER_IMAGE" \
-        npx prisma migrate deploy
-    
-    log "Migrations completed successfully"
-}
-
-# Deploy service
-deploy_service() {
-    log "Deploying service..."
-    
-    cd "$DEPLOY_DIR"
-    
-    # Stop existing containers
-    docker-compose -f "$DOCKER_COMPOSE_FILE" down || true
-    
-    # Start new containers
-    docker-compose -f "$DOCKER_COMPOSE_FILE" --env-file "$ENV_FILE" up -d
-    
-    # Wait for health check
-    log "Waiting for service to be healthy..."
-    sleep 10
-    
-    # Check health
-    if curl -f http://localhost:4000/health > /dev/null 2>&1; then
-        log "Service is healthy!"
-    else
-        error "Service health check failed!"
-    fi
-}
-
-# Rollback to previous version
-rollback() {
-    error "Deployment failed, rolling back..."
-    
-    # Find latest backup
-    LATEST_BACKUP=$(ls -t "$BACKUP_DIR" | head -1)
-    
-    if [ -n "$LATEST_BACKUP" ]; then
-        log "Rolling back to: $LATEST_BACKUP"
-        
-        # Stop current deployment
-        cd "$DEPLOY_DIR"
-        docker-compose -f "$DOCKER_COMPOSE_FILE" down || true
-        
-        # Restore backup
-        rm -rf "$DEPLOY_DIR"
-        cp -r "$BACKUP_DIR/$LATEST_BACKUP" "$DEPLOY_DIR"
-        
-        # Restore database if backup exists
-        if [ -f "$BACKUP_DIR/$LATEST_BACKUP/database.sql" ]; then
-            docker exec -i pokedex-mysql mysql -u root -p${MYSQL_ROOT_PASSWORD} auth_db < "$BACKUP_DIR/$LATEST_BACKUP/database.sql"
+        if [ -z "$TARGET_REF" ]; then
+            error "Unable to determine default remote branch (main/master)."
+            exit 1
         fi
-        
-        # Start previous version
-        cd "$DEPLOY_DIR"
-        docker-compose -f "$DOCKER_COMPOSE_FILE" --env-file "$ENV_FILE" up -d
-        
-        log "Rollback completed"
+        git reset --hard "$TARGET_REF"
+        git clean -fd
     else
-        error "No backup found for rollback!"
+        log "Cloning repository..."
+        git clone "$REPO_URL" "$PROJECT_DIR"
+        cd "$PROJECT_DIR"
     fi
+    
+    success "Code updated successfully"
 }
 
-# Setup initial deployment
-initial_setup() {
-    log "Performing initial setup..."
+# Setup environment
+setup_environment() {
+    log "Setting up environment..."
     
-    # Create directories
-    mkdir -p "$DEPLOY_DIR"
-    mkdir -p "$BACKUP_DIR"
-    
-    # Clone repository (replace with your actual repo)
-    cd "$(dirname "$DEPLOY_DIR")"
-    git clone https://github.com/yourusername/pokedex-auth-service.git "$(basename "$DEPLOY_DIR")"
-    
-    cd "$DEPLOY_DIR"
+    if [ ! -f ".env.production" ]; then
+        if [ -f ".env.production.example" ]; then
+            cp .env.production.example .env.production
+            warning "Created .env.production from .env.production.example. Please update with production values."
+        else
+            error ".env.production.example not found. Please create environment configuration."
+            exit 1
+        fi
+    fi
     
     # Generate RSA keys if not present
-    if [ ! -d "keys" ]; then
+    if [ ! -d "keys" ] || [ ! -f "keys/private.pem" ]; then
         log "Generating RSA keys..."
         mkdir -p keys
         openssl genrsa -out keys/private.pem 4096
         openssl rsa -in keys/private.pem -pubout -out keys/public.pem
         chmod 600 keys/private.pem
         chmod 644 keys/public.pem
+        success "RSA keys generated"
     fi
     
-    # Create .env.production file if not exists
-    if [ ! -f "$ENV_FILE" ]; then
-        log "Creating production environment file..."
-        cat > "$ENV_FILE" << EOF
-# Database
-DATABASE_URL=mysql://auth_user:CHANGE_ME@mysql:3306/auth_db
-MYSQL_ROOT_PASSWORD=CHANGE_ME
-MYSQL_DATABASE=auth_db
-MYSQL_USER=auth_user
-MYSQL_PASSWORD=CHANGE_ME
-
-# Server
-PORT=4000
-NODE_ENV=production
-
-# JWT
-JWT_PRIVATE_KEY_PATH=./keys/private.pem
-JWT_PUBLIC_KEY_PATH=./keys/public.pem
-JWT_EXPIRES_IN=24h
-
-# Security
-BCRYPT_ROUNDS=12
-CORS_ORIGIN=http://srv36.mikr.us:20275,http://srv36.mikr.us:3000
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX_REQUESTS=100
-EOF
-        warning "Please edit $ENV_FILE and set proper values!"
-        exit 0
-    fi
+    success "Environment setup complete"
 }
 
-# Main deployment flow
-main() {
-    log "Starting deployment of $SERVICE_NAME..."
-    
-    check_user
-    
-    # Check if this is initial setup
-    if [ ! -d "$DEPLOY_DIR" ]; then
-        initial_setup
-        exit 0
+# Ensure permissions on important files
+ensure_permissions() {
+    log "Ensuring file permissions..."
+    # Make deploy script executable
+    chmod +x deploy.sh 2>/dev/null || true
+    # Make any shell scripts in scripts/ executable
+    if [ -d "scripts" ]; then
+        chmod +x scripts/*.sh 2>/dev/null || true
     fi
+    # Makefile does not need executable bit; set readable by all
+    if [ -f "Makefile" ]; then
+        chmod 775 Makefile 2>/dev/null || true
+    fi
+    success "Permissions ensured"
+}
+
+# Build and deploy
+deploy() {
+    log "Starting deployment..."
     
-    # Load environment variables
-    source "$DEPLOY_DIR/$ENV_FILE"
+    # Stop existing services
+    log "Stopping existing services..."
+    $COMPOSE -f "$COMPOSE_FILE" down --remove-orphans || true
     
-    # Deployment steps with error handling
-    {
-        create_backup
-        pull_code
-        build_image
-        deploy_service
-        run_migrations
-    } || {
-        rollback
-    }
+    # Load env (for credentials) and login to Docker Hub if possible
+    load_env
+    dockerhub_login
+
+    # Pull latest image from registry
+    log "Pulling latest image(s) from registry..."
+    $COMPOSE -f "$COMPOSE_FILE" pull
     
-    log "Deployment completed successfully!"
+    # Start services
+    log "Starting services..."
+    $COMPOSE -f "$COMPOSE_FILE" up -d
     
-    # Show service status
-    docker ps | grep pokedex
+    success "Services started"
+}
+
+# Health check
+health_check() {
+    log "Performing health check..."
     
-    # Clean up old Docker images
+    local max_attempts=30
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        if curl -f -s "$HEALTH_URL" > /dev/null; then
+            success "Health check passed"
+            return 0
+        fi
+        
+        log "Health check attempt $attempt/$max_attempts failed, retrying in 5 seconds..."
+        sleep 5
+        ((attempt++))
+    done
+    
+    error "Health check failed after $max_attempts attempts"
+    return 1
+}
+
+# Cleanup old images
+cleanup() {
+    log "Cleaning up old Docker images..."
     docker image prune -f
+    success "Cleanup complete"
 }
 
-# Run main function
-main "$@"
+# Show status
+status() {
+    log "Service Status:"
+    $COMPOSE -f "$COMPOSE_FILE" ps
+    
+    log "Service Logs (last 20 lines):"
+    $COMPOSE -f "$COMPOSE_FILE" logs --tail=20
+}
+
+# Show logs
+logs() {
+    $COMPOSE -f "$COMPOSE_FILE" logs -f
+}
+
+# Restart service
+restart() {
+    log "Restarting service..."
+    $COMPOSE -f "$COMPOSE_FILE" restart
+    health_check
+}
+
+# Stop service
+stop() {
+    log "Stopping service..."
+    $COMPOSE -f "$COMPOSE_FILE" down
+    success "Service stopped"
+}
+
+# Main deployment function
+main_deploy() {
+    log "Starting Pokedex Auth Service deployment..."
+    
+    check_dependencies
+    update_code
+    setup_environment
+    ensure_permissions
+    deploy
+    
+    if health_check; then
+        cleanup
+        success "Deployment completed successfully!"
+        status
+    else
+        error "Deployment failed - health check unsuccessful"
+        log "Checking logs for errors..."
+        $COMPOSE -f "$COMPOSE_FILE" logs --tail=50
+        exit 1
+    fi
+}
+
+# Script usage
+usage() {
+    echo "Usage: $0 {deploy|status|logs|restart|stop|health}"
+    echo ""
+    echo "Commands:"
+    echo "  deploy  - Full deployment (default)"
+    echo "  status  - Show service status"
+    echo "  logs    - Show service logs"
+    echo "  restart - Restart service"
+    echo "  stop    - Stop service"
+    echo "  health  - Check service health"
+    exit 1
+}
+
+# Main script logic
+case "${1:-deploy}" in
+    deploy)
+        main_deploy
+        ;;
+    status)
+        cd "$PROJECT_DIR"
+        status
+        ;;
+    logs)
+        cd "$PROJECT_DIR"
+        logs
+        ;;
+    restart)
+        cd "$PROJECT_DIR"
+        restart
+        ;;
+    stop)
+        cd "$PROJECT_DIR"
+        stop
+        ;;
+    health)
+        health_check
+        ;;
+    *)
+        usage
+        ;;
+esac

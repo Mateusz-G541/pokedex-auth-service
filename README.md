@@ -239,6 +239,24 @@ curl -X GET http://localhost:4000/auth/public-key
 
 ## Production Deployment
 
+### Mikr.us VPS Deployment (Recommended)
+
+Deploy using Docker and Docker Hub registry:
+
+**Quick Start:**
+```bash
+# On your VPS
+curl -O https://raw.githubusercontent.com/Mateusz-G541/pokedex-auth-service/main/setup-mikrus.sh
+chmod +x setup-mikrus.sh
+./setup-mikrus.sh
+```
+
+**Full Documentation:**
+- [Quick Deploy Guide](./QUICK-DEPLOY.md) - Fast deployment steps
+- [Deployment Guide](./DEPLOYMENT.md) - Complete deployment documentation
+
+### Manual Production Setup
+
 1. **Generate secure RSA keys** with 4096 bits:
 ```bash
 openssl genrsa -out keys/private.pem 4096
