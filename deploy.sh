@@ -94,6 +94,17 @@ update_code() {
     if [ -d "$PROJECT_DIR" ]; then
         log "Project directory exists, pulling latest changes..."
         cd "$PROJECT_DIR"
+        
+        # Backup important files before git clean
+        if [ -f ".env.production" ]; then
+            log "Backing up .env.production..."
+            cp .env.production .env.production.backup
+        fi
+        if [ -d "keys" ]; then
+            log "Backing up RSA keys..."
+            cp -r keys keys.backup
+        fi
+        
         git fetch origin
         # Determine default remote branch (prefer main, else master)
         if git show-ref --verify --quiet refs/remotes/origin/main; then
@@ -110,6 +121,16 @@ update_code() {
         fi
         git reset --hard "$TARGET_REF"
         git clean -fd
+        
+        # Restore important files after git clean
+        if [ -f ".env.production.backup" ]; then
+            log "Restoring .env.production..."
+            mv .env.production.backup .env.production
+        fi
+        if [ -d "keys.backup" ]; then
+            log "Restoring RSA keys..."
+            mv keys.backup keys
+        fi
     else
         log "Cloning repository..."
         git clone "$REPO_URL" "$PROJECT_DIR"
