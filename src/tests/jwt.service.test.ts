@@ -9,12 +9,13 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(() => 'TEST_KEY')
 }));
 
-// Create realistic jwt mock that supports instanceof checks used in the service
-class MockTokenExpiredError extends Error {}
-class MockJsonWebTokenError extends Error {}
-
-// Mock jsonwebtoken - create spies inside the factory to avoid hoisting issues
+// Mock jsonwebtoken - ALL declarations must be inside the factory to avoid hoisting issues
 vi.mock('jsonwebtoken', () => {
+  // Create mock error classes inside the factory
+  class MockTokenExpiredError extends Error {}
+  class MockJsonWebTokenError extends Error {}
+  
+  // Create spy functions inside the factory
   const signSpy = vi.fn((..._args: any[]) => 'mock.token.value');
   const verifySpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
   const decodeSpy = vi.fn((_token: string) => ({ userId: 1, email: 'user@example.com' }));
@@ -38,10 +39,12 @@ vi.mock('jsonwebtoken', () => {
 import { jwtService } from '../services/jwt.service';
 import jwt from 'jsonwebtoken';
 
-// Get references to the mocked functions after import
+// Get references to the mocked functions and error classes after import
 const signSpy = jwt.sign as any;
 const verifySpy = jwt.verify as any;
 const decodeSpy = jwt.decode as any;
+const MockTokenExpiredError = jwt.TokenExpiredError;
+const MockJsonWebTokenError = jwt.JsonWebTokenError;
 
 describe('JwtService', () => {
   beforeEach(() => {
