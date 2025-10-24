@@ -36,11 +36,12 @@ export const validateRequest = (schema: ValidationSchema) => {
     }
 
     if (errors.length > 0) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'Validation failed',
         details: errors,
       });
+      return;
     }
 
     next();
